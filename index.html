@@ -20,20 +20,16 @@
             padding: 30px;
             border-radius: 10px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        .controls {
             display: flex;
             flex-direction: column;
-            gap: 15px;
-            margin-bottom: 20px;
             align-items: center;
         }
-        input[type="file"] {
-            padding: 10px;
-            border: 2px dashed #ddd;
-            border-radius: 5px;
-            width: 100%;
-            text-align: center;
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
         }
         button {
             background-color: #3498db;
@@ -48,6 +44,17 @@
         button:hover { background-color: #2980b9; }
         button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
         
+        button.secondary { background-color: #95a5a6; }
+        button.secondary:hover { background-color: #7f8c8d; }
+
+        /* Camera and Preview Styles */
+        #video-feed {
+            width: 100%;
+            max-width: 500px;
+            border-radius: 5px;
+            background: #000;
+            display: none; /* Hidden by default */
+        }
         #preview-image {
             max-width: 100%;
             max-height: 300px;
@@ -57,13 +64,7 @@
             border: 1px solid #ddd;
         }
         
-        #status {
-            text-align: center;
-            font-weight: bold;
-            margin: 10px 0;
-            color: #7f8c8d;
-            height: 20px;
-        }
+        #file-input { display: none; } /* Hide the ugly default file input */
         
         textarea {
             width: 100%;
@@ -72,8 +73,15 @@
             border: 1px solid #ddd;
             border-radius: 5px;
             resize: vertical;
+            margin-top: 20px;
             font-size: 16px;
-            line-height: 1.5;
+        }
+        #status {
+            text-align: center;
+            font-weight: bold;
+            margin: 10px 0;
+            color: #7f8c8d;
+            height: 20px;
         }
     </style>
 </head>
@@ -82,54 +90,116 @@
     <h1>📝 Handwriting to Digital Text</h1>
 
     <div class="container">
-        <div class="controls">
-            <input type="file" id="uploader" accept="image/*">
-            <img id="preview-image" src="" alt="Image preview">
-            <button id="convert-btn">Convert to Text</button>
+        <div class="button-group">
+            <button onclick="document.getElementById('file-input').click()" class="secondary">📂 Upload File</button>
+            <button id="start-camera-btn" class="secondary">📸 Start Camera</button>
         </div>
+
+        <input type="file" id="file-input" accept="image/*">
+
+        <video id="video-feed" autoplay playsinline></video>
+        <button id="snap-btn" style="display:none; margin-top:10px;">🔴 Take Photo</button>
+
+        <img id="preview-image" src="" alt="Image preview">
+        
+        <button id="convert-btn" style="margin-top: 20px; display:none;">Convert to Text</button>
 
         <div id="status"></div>
         <textarea id="result-text" placeholder="Your digital text will appear here..."></textarea>
     </div>
 
+    <canvas id="canvas" style="display:none;"></canvas>
+
     <script>
-        const uploader = document.getElementById('uploader');
+        const fileInput = document.getElementById('file-input');
+        const startCameraBtn = document.getElementById('start-camera-btn');
+        const videoFeed = document.getElementById('video-feed');
+        const snapBtn = document.getElementById('snap-btn');
+        const previewImage = document.getElementById('preview-image');
         const convertBtn = document.getElementById('convert-btn');
         const resultText = document.getElementById('result-text');
         const status = document.getElementById('status');
-        const previewImage = document.getElementById('preview-image');
+        const canvas = document.getElementById('canvas');
+        let stream = null;
 
-        // Show image preview when selected
-        uploader.addEventListener('change', (e) => {
+        // 1. Handle File Upload
+        fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) {
                 const reader = new FileReader();
                 reader.onload = function(event) {
-                    previewImage.src = event.target.result;
-                    previewImage.style.display = 'block';
+                    stopCamera(); // Stop camera if it was running
+                    showPreview(event.target.result);
                 }
                 reader.readAsDataURL(file);
             }
         });
 
-        // Handle conversion
-        convertBtn.addEventListener('click', () => {
-            const file = uploader.files[0];
-            if (!file) {
-                alert('Please upload an image first!');
-                return;
+        // 2. Handle Camera Start
+        startCameraBtn.addEventListener('click', async () => {
+            try {
+                // Request camera (prefer rear camera on mobile)
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                videoFeed.srcObject = stream;
+                
+                // UI updates
+                videoFeed.style.display = 'block';
+                snapBtn.style.display = 'block';
+                previewImage.style.display = 'none';
+                convertBtn.style.display = 'none';
+            } catch (err) {
+                console.error("Camera Error:", err);
+                alert("Could not access camera. Please allow permissions or use Upload.");
             }
+        });
 
+        // 3. Handle Snap Photo
+        snapBtn.addEventListener('click', () => {
+            // Set canvas size to match video stream
+            canvas.width = videoFeed.videoWidth;
+            canvas.height = videoFeed.videoHeight;
+            
+            // Draw video frame to canvas
+            const context = canvas.getContext('2d');
+            context.drawImage(videoFeed, 0, 0, canvas.width, canvas.height);
+            
+            // Convert to image URL
+            const imageDataUrl = canvas.toDataURL('image/png');
+            
+            stopCamera();
+            showPreview(imageDataUrl);
+        });
+
+        // Helper: Show the image to be converted
+        function showPreview(src) {
+            previewImage.src = src;
+            previewImage.style.display = 'block';
+            convertBtn.style.display = 'block';
+            status.innerText = "";
+        }
+
+        // Helper: Stop video stream to save battery
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                videoFeed.style.display = 'none';
+                snapBtn.style.display = 'none';
+            }
+        }
+
+        // 4. Run Tesseract Conversion
+        convertBtn.addEventListener('click', () => {
             status.innerText = "Initializing Tesseract engine...";
             convertBtn.disabled = true;
             resultText.value = "";
 
             Tesseract.recognize(
-                file,
-                'eng', // Language code (English)
+                previewImage.src,
+                'eng',
                 {
                     logger: m => {
-                        // Update status with progress
                         if (m.status === 'recognizing text') {
                             status.innerText = `Processing: ${Math.round(m.progress * 100)}%`;
                         } else {
@@ -148,6 +218,5 @@
             });
         });
     </script>
-
 </body>
 </html>
